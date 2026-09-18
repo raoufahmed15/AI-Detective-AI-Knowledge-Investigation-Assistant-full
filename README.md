@@ -1,1 +1,1 @@
-# AI-Detective-AI-Knowledge-Investigation-Assistant-full
+# AI-Detective-AI-Knowledge-Investigation-Assistant
