@@ -702,16 +702,13 @@ def rag_answer(
 st.markdown(
     f"""
     <div class="ai-detective-header">
-
         <div style="font-size:2.2rem;">
             🕵️
         </div>
-
         <div>
             <h1>{APP_TITLE}</h1>
             <p>{APP_SUBTITLE}</p>
         </div>
-
     </div>
     """,
     unsafe_allow_html=True,
