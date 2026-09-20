@@ -95,50 +95,143 @@ st.markdown(
     """
     <style>
 
+    :root {
+        --bg: #0b1220;
+        --bg-soft: #111b2d;
+        --panel: rgba(18, 27, 39, 0.82);
+        --panel-strong: rgba(21, 30, 43, 0.98);
+        --line: rgba(148, 163, 184, 0.16);
+        --text: #edf6ff;
+        --muted: #a5b4c9;
+        --primary: #ff5a36;
+        --secondary: #ffb347;
+        --success: #59d38b;
+        --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+    }
+
+    .stApp {
+        background:
+            radial-gradient(circle at top left, rgba(255, 90, 54, 0.18), transparent 24%),
+            radial-gradient(circle at top right, rgba(87, 129, 255, 0.14), transparent 26%),
+            linear-gradient(180deg, #070d18 0%, #0d1524 100%);
+        color: var(--text);
+    }
+
     .block-container {
-        padding-top: 2.5rem;
-        max-width: 820px;
+        padding-top: 2.25rem;
+        padding-bottom: 2rem;
+        max-width: 960px;
     }
 
     .ai-detective-header {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 1px solid rgba(120,120,120,0.25);
+        gap: 0.9rem;
+        padding: 1rem 1.15rem;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(19, 30, 46, 0.94), rgba(11, 18, 32, 0.9));
+        box-shadow: var(--shadow);
         margin-bottom: 1.25rem;
     }
 
     .ai-detective-header h1 {
         margin: 0;
         font-size: 1.9rem;
+        letter-spacing: -0.04em;
+        color: var(--text);
     }
 
     .ai-detective-header p {
-        margin: 0;
-        opacity: 0.7;
-        font-size: 0.95rem;
+        margin: 0.3rem 0 0;
+        opacity: 0.8;
+        font-size: 0.92rem;
+        color: var(--muted);
+    }
+
+    .stChatMessage {
+        font-size: 0.97rem;
+        line-height: 1.6;
+        color: var(--text);
+    }
+
+    .stChatMessage > div {
+        border-radius: 18px !important;
+        border: 1px solid var(--line) !important;
+        box-shadow: 0 8px 20px rgba(7, 11, 18, 0.25);
+        backdrop-filter: blur(2px);
+    }
+
+    .stChatMessage[data-testid="stChatMessageUser"] > div {
+        background: linear-gradient(180deg, rgba(24, 35, 49, 0.96), rgba(14, 22, 31, 0.94));
+        border-color: rgba(95, 120, 164, 0.25) !important;
+    }
+
+    .stChatMessage[data-testid="stChatMessageAssistant"] > div {
+        background: linear-gradient(180deg, rgba(255, 153, 89, 0.16), rgba(255, 90, 54, 0.08));
+        border-color: rgba(255, 123, 76, 0.22) !important;
+    }
+
+    .stChatInput {
+        border-radius: 18px !important;
+        border: 1px solid rgba(96, 105, 125, 0.3) !important;
+        background: rgba(15, 23, 35, 0.88) !important;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.28);
+    }
+
+    .stChatInput textarea {
+        background: transparent !important;
+        color: var(--text) !important;
+        font-size: 0.98rem !important;
+    }
+
+    .stChatInput button {
+        border-radius: 12px !important;
+        background: linear-gradient(135deg, var(--primary), #ff7c45) !important;
+        color: white !important;
+        font-weight: 700 !important;
     }
 
     .evidence-card {
-        border: 1px solid rgba(120,120,120,0.25);
-        border-radius: 10px;
-        padding: 0.6rem 0.9rem;
+        border: 1px solid rgba(140, 160, 190, 0.2);
+        border-radius: 14px;
+        padding: 0.8rem 0.9rem;
         margin-bottom: 0.5rem;
-        font-size: 0.85rem;
+        font-size: 0.82rem;
+        background: rgba(15, 23, 35, 0.78);
+        color: var(--text);
     }
 
     .evidence-score {
         display: inline-block;
-        padding: 0.05rem 0.5rem;
+        padding: 0.08rem 0.6rem;
         border-radius: 999px;
-        background: rgba(46,164,79,0.15);
-        font-weight: 600;
-        font-size: 0.75rem;
+        background: rgba(89, 211, 139, 0.12);
+        border: 1px solid rgba(89, 211, 139, 0.18);
+        color: #aef0c6;
+        font-weight: 700;
+        font-size: 0.72rem;
     }
 
-    .stChatMessage {
-        font-size: 0.95rem;
+    .stExpander {
+        border: 1px solid var(--line) !important;
+        border-radius: 14px !important;
+        background: rgba(13, 24, 37, 0.74) !important;
+    }
+
+    .stExpander summary {
+        color: var(--text) !important;
+        font-weight: 600;
+    }
+
+    .sidebar-content {
+        background: linear-gradient(180deg, rgba(10, 17, 27, 0.97), rgba(12, 21, 32, 0.9));
+    }
+
+    code {
+        background: rgba(148, 163, 184, 0.12) !important;
+        color: #ffdf99 !important;
+        border-radius: 6px;
     }
 
     </style>
