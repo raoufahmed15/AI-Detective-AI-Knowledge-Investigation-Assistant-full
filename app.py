@@ -45,10 +45,25 @@ ARTIFACTS_DIR = "model"
 # or create .streamlit/secrets.toml with GROQ_API_KEY = "..."
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
-# Groq model availability depends on the account. Use a model ID that is active for
-# this key; older llama IDs can return 404 or decommissioned errors.
-DEFAULT_GENERATION_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
-DEFAULT_REWRITE_MODEL = os.getenv("GROQ_REWRITE_MODEL", "openai/gpt-oss-20b")
+# Groq model availability depends on the account. Use IDs that are active for this
+# key; older or decommissioned model names can return 404, empty content, or no
+# usable answer.
+DEFAULT_GENERATION_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+DEFAULT_REWRITE_MODEL = os.getenv("GROQ_REWRITE_MODEL", "llama-3.3-70b-versatile")
+
+FALLBACK_GENERATION_MODELS = [
+    DEFAULT_GENERATION_MODEL,
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-20b",
+]
+
+FALLBACK_REWRITE_MODELS = [
+    DEFAULT_REWRITE_MODEL,
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-20b",
+]
 
 GENERATION_MODEL = os.getenv("GROQ_MODEL") or DEFAULT_GENERATION_MODEL
 REWRITE_MODEL = os.getenv("GROQ_REWRITE_MODEL") or DEFAULT_REWRITE_MODEL
@@ -326,6 +341,72 @@ def get_client():
 
 
 # ============================================================================
+# Input safety helpers
+# ============================================================================
+
+def is_abusive_or_empty_request(question):
+    """Reject unsafe or empty prompts before they hit the rewrite/model pipeline."""
+
+    if question is None:
+        return True
+
+    cleaned = str(question).strip()
+    if not cleaned:
+        return True
+
+    normalized = cleaned.lower()
+    abusive_terms = (
+        "go to hell",
+        "idiot",
+        "stupid",
+        "dumbass",
+        "hate you",
+        "kill yourself",
+        "fuck",
+        "f***",
+        "bitch",
+        "asshole",
+        "damn",
+    )
+
+    return any(term in normalized for term in abusive_terms)
+
+
+def extract_text_from_content(content):
+    """Normalize Groq/OpenAI content payloads that may be a string or a list."""
+
+    if content is None:
+        return ""
+
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, list):
+        fragments = []
+        for item in content:
+            if isinstance(item, str):
+                fragments.append(item)
+            elif isinstance(item, dict):
+                for key in ("text", "content"):
+                    value = item.get(key)
+                    if isinstance(value, str):
+                        fragments.append(value)
+                    elif isinstance(value, list):
+                        fragments.extend(
+                            part for part in (extract_text_from_content(value) for value in value) if part
+                        )
+        return "\n".join(fragments).strip()
+
+    if isinstance(content, dict):
+        for key in ("text", "content"):
+            value = content.get(key)
+            if value:
+                return extract_text_from_content(value)
+
+    return ""
+
+
+# ============================================================================
 # Groq text generation
 # ============================================================================
 
@@ -335,50 +416,70 @@ def generate_text(
     model,
     max_tokens=500,
     temperature=0.5,
+    fallback_models=None,
 ):
-    """Generate text via the Groq OpenAI-compatible API."""
+    """Generate text via the Groq OpenAI-compatible API with fallback model support."""
 
     api_key = client["api_key"]
     url = "https://api.groq.com/openai/v1/chat/completions"
+    candidate_models = []
 
-    response = requests.post(
-        url,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        },
-        timeout=60,
-    )
+    if model:
+        candidate_models.append(model)
 
-    if not response.ok:
+    if fallback_models:
+        for fallback_model in fallback_models:
+            if fallback_model and fallback_model not in candidate_models:
+                candidate_models.append(fallback_model)
+
+    last_error = None
+
+    for candidate in candidate_models:
         try:
-            details = response.json()
-        except Exception:
-            details = response.text
+            response = requests.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": candidate,
+                    "messages": [
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                },
+                timeout=60,
+            )
 
-        raise RuntimeError(
-            f"Groq API error {response.status_code}: {details}"
-        )
+            if not response.ok:
+                try:
+                    details = response.json()
+                except Exception:
+                    details = response.text
+                last_error = RuntimeError(f"Groq API error {response.status_code}: {details}")
+                continue
 
-    payload = response.json()
-    choices = payload.get("choices") or []
-    if not choices:
-        raise RuntimeError("Groq API returned no choices.")
+            payload = response.json()
+            choices = payload.get("choices") or []
+            if not choices:
+                last_error = RuntimeError("Groq API returned no choices.")
+                continue
 
-    message = choices[0].get("message") or {}
-    text = message.get("content")
-    if not text:
-        raise RuntimeError("Groq API returned an empty response.")
+            message = choices[0].get("message") or choices[0].get("delta") or {}
+            text = extract_text_from_content(message.get("content"))
+            if not text:
+                last_error = RuntimeError("Groq API returned an empty response.")
+                continue
 
-    return str(text).strip()
+            return str(text).strip()
+
+        except Exception as error:
+            last_error = error
+            continue
+
+    raise last_error or RuntimeError("Groq API failed to generate a response.")
 
 
 # ============================================================================
@@ -392,6 +493,9 @@ def contextualize_query(
 ):
 
     if not history:
+        return question
+
+    if is_abusive_or_empty_request(question):
         return question
 
     prompt = f"""
@@ -419,13 +523,17 @@ Reply with ONLY the rewritten question.
 Rewritten question:
 """.strip()
 
-    rewritten = generate_text(
-        client=client,
-        prompt=prompt,
-        model=REWRITE_MODEL,
-        max_tokens=60,
-        temperature=0.3,
-    )
+    try:
+        rewritten = generate_text(
+            client=client,
+            prompt=prompt,
+            model=REWRITE_MODEL,
+            max_tokens=60,
+            temperature=0.3,
+            fallback_models=FALLBACK_REWRITE_MODELS,
+        )
+    except Exception:
+        return question
 
     rewritten = rewritten.split("\n")[0].strip()
 
@@ -435,6 +543,44 @@ Rewritten question:
 # ============================================================================
 # Main RAG answer
 # ============================================================================
+
+def fallback_answer_from_evidence(question, evidence):
+    """Answer from retrieved evidence when model generation fails."""
+
+    if not evidence:
+        return (
+            "I could not find strong evidence for this question in the retrieved records. "
+            "Please ask about a specific incident or evidence item."
+        )
+
+    lower_question = str(question).lower()
+    extracted = []
+
+    for item in evidence:
+        text = str(item.get("text") or "")
+        lower_text = text.lower()
+        if "vehicle" in lower_question or "car" in lower_question or "van" in lower_question or "sedan" in lower_question:
+            if "vehicle:" in lower_text or "vehicle" in lower_text or "sedan" in lower_text or "van" in lower_text:
+                extracted.append(text)
+        elif "where" in lower_question or "location" in lower_question:
+            if "location:" in lower_text or "location" in lower_text:
+                extracted.append(text)
+        elif "who" in lower_question or "suspect" in lower_question or "driver" in lower_question:
+            if "suspect" in lower_text or "driver" in lower_text or "person" in lower_text:
+                extracted.append(text)
+
+    if not extracted:
+        extracted = [str(evidence[0].get("text") or "")]
+
+    summary = extracted[0]
+    if len(summary) > 450:
+        summary = summary[:450].rstrip() + "..."
+
+    return (
+        "Based on the retrieved evidence: "
+        f"{summary}"
+    )
+
 
 def rag_answer(
     client,
@@ -446,6 +592,18 @@ def rag_answer(
     top_k=TOP_K,
     temperature=TEMPERATURE,
 ):
+
+    if is_abusive_or_empty_request(question):
+        fallback = (
+            "I can’t help with abusive or non-investigative requests. "
+            "Please ask a question about the case evidence or incident records."
+        )
+        return {
+            "answer": fallback,
+            "original_question": question,
+            "contextualized_question": question,
+            "sources": [],
+        }
 
     # ------------------------------------------------------------
     # 1. Rewrite question using conversation history
@@ -483,13 +641,17 @@ def rag_answer(
     # 4. Generate final answer
     # ------------------------------------------------------------
 
-    answer = generate_text(
-        client=client,
-        prompt=prompt,
-        model=GENERATION_MODEL,
-        max_tokens=500,
-        temperature=temperature,
-    )
+    try:
+        answer = generate_text(
+            client=client,
+            prompt=prompt,
+            model=GENERATION_MODEL,
+            max_tokens=500,
+            temperature=temperature,
+            fallback_models=FALLBACK_GENERATION_MODELS,
+        )
+    except Exception:
+        answer = fallback_answer_from_evidence(question, evidence)
 
     # ------------------------------------------------------------
     # 5. Update conversation memory
@@ -741,13 +903,17 @@ if question:
                     temperature=TEMPERATURE,
                 )
 
-            except Exception as error:
+            except Exception:
 
-                st.error(
-                    f"حصل خطأ أثناء توليد الإجابة:\n\n{error}"
-                )
-
-                st.stop()
+                result = {
+                    "answer": (
+                        "تمت معالجة الطلب باستخدام الأدلة المسترجعة فقط، لأن النموذج لا يستجيب الآن. "
+                        "يرجى إعادة المحاولة إذا رغبت، أو طرح سؤال حول حادثة محددة."
+                    ),
+                    "original_question": question,
+                    "contextualized_question": question,
+                    "sources": [],
+                }
 
         # --------------------------------------------------------
         # Show answer
